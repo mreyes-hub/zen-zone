@@ -187,14 +187,23 @@ const TRACKS=[
   {id:'cosmos',icon:'🪐',name:'Cosmic Drift',desc:'Deep space ambient',type:'tone',freq:108,wave:'sine'},
   {id:'pink',icon:'🩷',name:'Pink Noise',desc:'Balanced frequency calm',type:'noise',filter:3000},
 ];
-function initAudio(){if(audioCtx)return;audioCtx=new(window.AudioContext||window.webkitAudioContext)();masterGain=audioCtx.createGain();masterGain.gain.value=isMuted?0:volume;masterGain.connect(audioCtx.destination)}
+function initAudio(){
+if(!audioCtx){
+audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+masterGain=audioCtx.createGain();
+masterGain.gain.value=isMuted?0:volume;
+masterGain.connect(audioCtx.destination);
+}
+if(audioCtx.state==='suspended'){audioCtx.resume()}
+}
 function stopTrack(){currentNodes.forEach(n=>{try{n.stop()}catch(e){}try{n.disconnect()}catch(e){}});currentNodes=[];currentTrackId=null}
-function playTrack(t){initAudio();if(audioCtx.state==='suspended')audioCtx.resume();stopTrack();currentTrackId=t.id;
+function playTrack(t){initAudio();
+var doPlay=function(){stopTrack();currentTrackId=t.id;
   if(t.type==='noise'){const len=audioCtx.sampleRate*4,buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate),d=buf.getChannelData(0);let last=0;for(let i=0;i<len;i++){last=(last+.02*(Math.random()*2-1))/1.02;d[i]=last*3.5}const src=audioCtx.createBufferSource();src.buffer=buf;src.loop=true;const f=audioCtx.createBiquadFilter();f.type='lowpass';f.frequency.value=t.filter;const g=audioCtx.createGain();g.gain.value=.7;src.connect(f);f.connect(g);g.connect(masterGain);src.start();currentNodes.push(src,f,g)}
   else if(t.type==='tone'){[1,1.5,2,3].forEach((m,i)=>{const o=audioCtx.createOscillator();o.type=t.wave||'sine';o.frequency.value=t.freq*m;const g=audioCtx.createGain();g.gain.value=.15/(i+1);o.connect(g);g.connect(masterGain);o.start();currentNodes.push(o,g)})}
   else if(t.type==='bells'){const ratios=[1,1.5,2,2.5,3];function ring(){if(currentTrackId!==t.id)return;const freq=t.freq*ratios[~~(Math.random()*ratios.length)];const o=audioCtx.createOscillator();o.type='sine';o.frequency.value=freq;const g=audioCtx.createGain();g.gain.setValueAtTime(.2,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+4);o.connect(g);g.connect(masterGain);o.start();o.stop(audioCtx.currentTime+4);setTimeout(ring,2000+Math.random()*3000)}ring();const ph=audioCtx.createOscillator();ph.frequency.value=0;const pg=audioCtx.createGain();pg.gain.value=0;ph.connect(pg);pg.connect(masterGain);ph.start();currentNodes.push(ph,pg)}
   else if(t.type==='binaural'){const oL=audioCtx.createOscillator(),oR=audioCtx.createOscillator();oL.frequency.value=t.freqL;oR.frequency.value=t.freqR;const mg=audioCtx.createChannelMerger(2),gL=audioCtx.createGain(),gR=audioCtx.createGain();gL.gain.value=.3;gR.gain.value=.3;oL.connect(gL);gL.connect(mg,0,0);oR.connect(gR);gR.connect(mg,0,1);mg.connect(masterGain);oL.start();oR.start();currentNodes.push(oL,oR,gL,gR,mg)}
-  updateTrackUI()}
+  updateTrackUI()};if(audioCtx.state==="suspended"){audioCtx.resume().then(_start)}else{_start()}
 function toggleMute(){isMuted=!isMuted;if(masterGain)masterGain.gain.value=isMuted?0:volume;document.getElementById('muteBtn').textContent=isMuted?'🔇':'🔊';document.getElementById('muteBtn').classList.toggle('muted',isMuted)}
 function updateTrackUI(){document.querySelectorAll('.track-item').forEach(el=>{const a=el.dataset.trackId===currentTrackId;el.classList.toggle('active',a);const eq=el.querySelector('.track-playing');if(eq)eq.style.display=a?'flex':'none'});const bar=document.getElementById('nowPlayingBar');if(currentTrackId){const t=TRACKS.find(x=>x.id===currentTrackId);bar.innerHTML=`<div class="np-title">${t.icon} ${t.name}</div><div>${t.desc}</div>`}else bar.innerHTML='<div style="color:rgba(255,255,255,0.35)">tap a track to play</div>'}
 (function(){const list=document.getElementById('trackList');TRACKS.forEach(t=>{const el=document.createElement('div');el.className='track-item';el.dataset.trackId=t.id;el.innerHTML=`<span class="track-icon">${t.icon}</span><div class="track-info"><div class="track-name">${t.name}</div><div class="track-desc">${t.desc}</div></div><div class="track-playing" style="display:none"><span></span><span></span><span></span></div>`;el.onclick=()=>{if(currentTrackId===t.id){stopTrack();updateTrackUI()}else playTrack(t)};list.appendChild(el)})})();
@@ -463,4 +472,31 @@ function initSmash(){clearInterval(smInt);const panel=document.getElementById('s
 
 window.addEventListener('resize',()=>{({bubbles:initBubbles,sand:initSand,paint:initPaint,color:initColor,dots:initDots})[currentMode]?.()});
 initBubbles();
+
+// iOS Audio Unlock - must happen on first user touch
+function unlockAudio(){
+  if(!audioCtx){
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    masterGain=audioCtx.createGain();
+    masterGain.gain.value=isMuted?0:volume;
+    masterGain.connect(audioCtx.destination);
+  }
+  if(audioCtx.state==='suspended'){
+    audioCtx.resume().then(()=>{console.log('Audio unlocked')});
+  }
+  // Play silent buffer to fully unlock on iOS
+  try{
+    const b=audioCtx.createBuffer(1,1,22050);
+    const s=audioCtx.createBufferSource();
+    s.buffer=b;s.connect(audioCtx.destination);
+    s.start(0);
+  }catch(e){}
+  document.removeEventListener('touchstart',unlockAudio,true);
+  document.removeEventListener('touchend',unlockAudio,true);
+  document.removeEventListener('click',unlockAudio,true);
+}
+document.addEventListener('touchstart',unlockAudio,true);
+document.addEventListener('touchend',unlockAudio,true);
+document.addEventListener('click',unlockAudio,true);
+
 </script></body></html>
